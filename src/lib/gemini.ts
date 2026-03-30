@@ -1,22 +1,7 @@
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { StampExtraction } from '@/types';
 
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
-
-export async function extractStampData(imageBase64: string, mimeType: string): Promise<StampExtraction> {
-  const apiKey = process.env.GOOGLE_API_KEY;
-  if (!apiKey) {
-    throw new Error('Missing GOOGLE_API_KEY environment variable');
-  }
-
-  const response = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [
-        {
-          parts: [
-            {
-              text: `Analyze this passport stamp image. Extract the following information and respond ONLY with valid JSON (no markdown, no code blocks):
+const STAMP_PROMPT = `Analyze this passport stamp image. Extract the following information and respond ONLY with valid JSON (no markdown, no code blocks):
 
 {
   "country": "country name or null if unreadable",
@@ -27,27 +12,37 @@ export async function extractStampData(imageBase64: string, mimeType: string): P
   "raw_text": "all readable text from the stamp"
 }
 
-If the image is not a passport stamp, return: {"country":null,"city":null,"date":null,"type":"unknown","confidence":0,"raw_text":"Not a passport stamp"}`,
-            },
-            {
-              inlineData: {
-                mimeType,
-                data: imageBase64,
-              },
-            },
-          ],
-        },
-      ],
-    }),
-  });
+If the image is not a passport stamp, return: {"country":null,"city":null,"date":null,"type":"unknown","confidence":0,"raw_text":"Not a passport stamp"}`;
 
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Gemini API error: ${response.status} — ${error}`);
+/**
+ * Extracts passport stamp data from a base64-encoded image using Google Gemini.
+ * @param imageBase64 - The image encoded as a base64 string
+ * @param mimeType - The MIME type of the image (e.g. "image/jpeg")
+ * @returns Extracted stamp data
+ */
+export async function extractStampData(
+  imageBase64: string,
+  mimeType: string
+): Promise<StampExtraction> {
+  const apiKey = process.env.GOOGLE_API_KEY;
+  if (!apiKey) {
+    throw new Error('Missing GOOGLE_API_KEY environment variable');
   }
 
-  const result = await response.json();
-  const text = result.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+
+  const result = await model.generateContent([
+    {
+      inlineData: {
+        mimeType,
+        data: imageBase64,
+      },
+    },
+    { text: STAMP_PROMPT },
+  ]);
+
+  const text = result.response.text();
 
   // Strip markdown code blocks if present
   const cleaned = text.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
